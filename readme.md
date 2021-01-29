@@ -8,7 +8,7 @@
 
 
 ~~~sql
-CREATE TABLE `monitor_info` (
+CREATE TABLE `equipment_info` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
 	`region` varchar(20) NOT NULL,
 	`code` varchar(20) NOT NULL,

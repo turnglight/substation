@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	_ "github.com/go-sql-driver/mysql"
 	"go.uber.org/zap"
-	"substation.com/logger"
 )
 //
 //const (
@@ -20,9 +19,7 @@ import (
 var logx *zap.Logger
 
 func NewConnection(driver, dataSource string) (*sql.DB, error) {
-	logx = logger.NewInstance()
 	return sql.Open(driver, dataSource)
-
 }
 
 //func main(){

@@ -3,7 +3,10 @@ package main
 import (
 	"bufio"
 	list2 "container/list"
+	"database/sql"
+	"fmt"
 	"go.uber.org/zap"
+	"log"
 	"net"
 	"substation.com/database"
 	"substation.com/logger"
@@ -12,13 +15,18 @@ import (
 )
 
 const (
-	Region = "hubei"
-	Code   = "SheathCurrent"
-	Productor   = "伏佳安达"
+	Region     = "tangshan"
+	Code       = "SheathCurrent"
+	Productor  = "伏佳安达"
+	DbDriver   = "mysql"
+	DataSource = "root:admin@tcp(localhost:3306)/monitor_tangshan"
 )
 
-// 自定义日志归档器
-var logx *zap.Logger = logger.NewInstance()
+// 文件日志处理器
+var logx *zap.Logger = logger.NewInstanceForHook()
+
+// stdout日志处理器
+var logf *zap.Logger = logger.NewInstanceForStdout()
 
 func main() {
 	defer logx.Sync() // flushes buffer, if any
@@ -84,7 +92,7 @@ func process(conn net.Conn) {
 
 			// 解析后计算最终value
 			sheath.Compute()
-			logx.Info("received data",
+			logf.Info("received data",
 				zap.Int16("headerTag", sheath.HeaderTag),
 				zap.Int32("monitorId", sheath.MonitorId),
 				zap.Int64("token", sheath.Token),
@@ -102,7 +110,6 @@ func process(conn net.Conn) {
 				break
 			}
 		}
-
 		// 将接受到的数据返回给客户端
 		_, err = conn.Write([]byte("successful"))
 		if err != nil {
@@ -117,35 +124,93 @@ func process(conn net.Conn) {
 }
 
 func pushToMysql(list *list2.List) {
-	db, err := database.NewConnection("mysql", "root:roottest@tcp(192.168.0.2:3111)/monitor_data_center")
+	db, err := database.NewConnection(DbDriver, DataSource)
 	if err != nil {
-		logx.Error("connect to mysql unsuccessfully", zap.String("remoteAddress", "root:roottest@tcp(192.168.0.2:3111)/monitor_data_center"))
+		logx.Error("connect to mysql unsuccessfully", zap.String("remoteAddress", DataSource))
 		return
+	}
+	pingErr := db.Ping()
+	if pingErr != nil {
+		logx.Error("sorry, can't connect to mysql", zap.String("remoteAddress", DataSource))
 	}
 	db.SetMaxOpenConns(20)
 	defer db.Close()
-///////////
-////lkjlkj
+	fmt.Println("开启事务")
+	tx, _ := db.Begin()
 	i := 0
 	for e := list.Front(); e != nil; e = e.Next() {
 		sheath := e.Value
-		cmdType := sheath.(protocol.Sheath).CmdType
-		monitorId := sheath.(protocol.Sheath).MonitorId
+		cmdType := sheath.(*protocol.Sheath).CmdType
+		monitorId := sheath.(*protocol.Sheath).MonitorId
+		seqNumber := sheath.(*protocol.Sheath).SeqNumber
+		receiveTime := sheath.(*protocol.Sheath).ReceiveTime
+		deviceId := sheath.(*protocol.Sheath).DeviceId
+		data := sheath.(*protocol.Sheath).Data
+		formula := sheath.(*protocol.Sheath).Formula
+		finalValue := sheath.(*protocol.Sheath).FinalValue
+		state := sheath.(*protocol.Sheath).State
 		if i == 0 {
-			querySql := "select id from equipment_info where monior_id =? and code =? and region=?"
+			querySql := "select id from equipment_info where monitor_id =? and code =? and region=?"
 			rows, err := db.Query(querySql, monitorId, Code, Region)
 			if err != nil {
-				logx.Error("")
+				logx.Error("execute query sql failure", zap.String("error", err.Error()))
+				panic(err.Error())
 			}
 			// 如果还没有初始化此设备，则进行初始化
 			if !rows.Next() {
-				name :=  "设备"+string(monitorId)+"("+Region+Code+")"
+				name := "设备" + string(monitorId) + "(" + Region + Code + ")"
 				now := time.Now()
-				now.Format("2006-01-02 15:04:05")
 				insertSql := "insert into equipment_info(monitor_id, region, code, name, productor, state, create_time) value(?, ?, ?, ?, ?, ?, ?)"
-				db.Exec(insertSql, monitorId, Region, Code, name, Productor, 1, now.Format("2006-01-02 15:04:05"))
+				rs, err := tx.Exec(insertSql, monitorId, Region, Code, name, Productor, 1, now.Format("2006-01-02 15:04:05"))
+				if err != nil {
+					logx.Fatal("failed to execute insertSql", zap.String("error", err.Error()))
+				}
+				rowAffected, err := rs.RowsAffected()
+				if err != nil {
+					log.Fatalln(err)
+				}
+				logx.Info("successful", zap.Int64("effected rows", rowAffected))
 			}
 		}
-		// 先判断是否存在表
+		tableName := "sheath_equepment_" + string(monitorId)
+		fmt.Printf("%v\n", tableName)
+		b, _ := createTable(tableName, tx)
+		if b {
+			insertSql := "insert into " + tableName +
+				"(monitor_id, cmd_type, seq_num, receive_time, device_id, data, formula, final_value, state, create_time) " +
+				"value(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			rs, err := tx.Exec(insertSql, monitorId, cmdType, seqNumber, receiveTime, deviceId, data, formula, finalValue, state, time.Now().Format("2006-01-02 15:04:05"))
+			if err != nil {
+				logx.Fatal("failed to execute insertSql", zap.String("error", err.Error()))
+			}
+			rowAffected, err := rs.RowsAffected()
+			if err != nil {
+				log.Fatalln(err)
+			}
+			logx.Info("successful", zap.Int64("effected rows", rowAffected))
+		}
 	}
+	tx.Commit()
+	fmt.Println("事务提交")
+}
+
+func createTable(tableName string, tx *sql.Tx) (bool, *error) {
+	createTableSql := "create table if not exists " + tableName + "(" +
+		"id int(11) not null auto_increment," +
+		"monitor_id int(6) not null," +
+		"cmd_type int(4) not null," +
+		"seq_num int(4) not null," +
+		"receive_time datetime not null," +
+		"device_id int(4) not null," +
+		"data varchar(10) not null," +
+		"final_value varchar(10)," +
+		"state int(4)," +
+		"create_time datetime," +
+		"primary key(id)" +
+		")"
+	_, err := tx.Exec(createTableSql)
+	if err != nil {
+		return false, &err
+	}
+	return true, nil
 }

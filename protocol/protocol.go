@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"substation.com/logger"
+	"time"
 )
 
 // 8通道信号采集板通讯协议
@@ -44,6 +45,9 @@ type Sheath struct {
 	Formula string
 	// 最终的数据值
 	FinalValue float64
+	// 数据接收时间
+	ReceiveTime string
+	State int8
 }
 
 // WhatError
@@ -60,13 +64,16 @@ func (e *ProtocolError) Error() string{
 }
 
 func (sheath *Sheath) Handle(buffer []byte, conn net.Conn) (*[]byte, error){
-	logx := logger.NewInstance()
+
+	logx := logger.NewInstanceForHook()
 	defer logx.Sync()
 	headLength := 34
 	var rtnBytes []byte
 	if len(buffer) > headLength {
 		reader := bytes.NewReader(buffer)
 		sheath.Type = "SheathProtocol"
+		sheath.ReceiveTime = time.Now().Format("2006-01-02 15:04:05")
+		sheath.State = 0
 		binary.Read(reader, binary.BigEndian, &sheath.HeaderTag)
 		binary.Read(reader, binary.BigEndian, &sheath.MonitorId)
 		skip := make([]byte, 8)
