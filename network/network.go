@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"log"
 	"net"
+	"strconv"
 	"substation.com/database"
 	"substation.com/logger"
 	"substation.com/protocol"
@@ -133,10 +134,10 @@ func pushToMysql(list *list2.List) {
 	if pingErr != nil {
 		logx.Error("sorry, can't connect to mysql", zap.String("remoteAddress", DataSource))
 	}
-	db.SetMaxOpenConns(20)
+	db.SetMaxOpenConns(100)
 	defer db.Close()
 	fmt.Println("开启事务")
-	tx, _ := db.Begin()
+
 	i := 0
 	for e := list.Front(); e != nil; e = e.Next() {
 		sheath := e.Value
@@ -158,7 +159,8 @@ func pushToMysql(list *list2.List) {
 			}
 			// 如果还没有初始化此设备，则进行初始化
 			if !rows.Next() {
-				name := "设备" + string(monitorId) + "(" + Region + Code + ")"
+				tx, _ := db.Begin()
+				name := "设备" + strconv.Itoa(int(monitorId)) + "(" + Region + "-" + Code + ")"
 				now := time.Now()
 				insertSql := "insert into equipment_info(monitor_id, region, code, name, productor, state, create_time) value(?, ?, ?, ?, ?, ?, ?)"
 				rs, err := tx.Exec(insertSql, monitorId, Region, Code, name, Productor, 1, now.Format("2006-01-02 15:04:05"))
@@ -169,13 +171,15 @@ func pushToMysql(list *list2.List) {
 				if err != nil {
 					log.Fatalln(err)
 				}
+				tx.Commit()
 				logx.Info("successful", zap.Int64("effected rows", rowAffected))
 			}
 		}
-		tableName := "sheath_equepment_" + string(monitorId)
+		tableName := "sheath_equepment_" + strconv.Itoa(int(monitorId))
 		fmt.Printf("%v\n", tableName)
-		b, _ := createTable(tableName, tx)
+		b, _ := createTable(tableName, db)
 		if b {
+			tx, _ := db.Begin()
 			insertSql := "insert into " + tableName +
 				"(monitor_id, cmd_type, seq_num, receive_time, device_id, data, formula, final_value, state, create_time) " +
 				"value(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -188,13 +192,13 @@ func pushToMysql(list *list2.List) {
 				log.Fatalln(err)
 			}
 			logx.Info("successful", zap.Int64("effected rows", rowAffected))
+			tx.Commit()
 		}
 	}
-	tx.Commit()
 	fmt.Println("事务提交")
 }
 
-func createTable(tableName string, tx *sql.Tx) (bool, *error) {
+func createTable(tableName string, db *sql.DB) (bool, *error) {
 	createTableSql := "create table if not exists " + tableName + "(" +
 		"id int(11) not null auto_increment," +
 		"monitor_id int(6) not null," +
@@ -202,15 +206,18 @@ func createTable(tableName string, tx *sql.Tx) (bool, *error) {
 		"seq_num int(4) not null," +
 		"receive_time datetime not null," +
 		"device_id int(4) not null," +
+		"formula varchar(40) not null," +
 		"data varchar(10) not null," +
 		"final_value varchar(10)," +
 		"state int(4)," +
 		"create_time datetime," +
 		"primary key(id)" +
 		")"
+	tx, _ := db.Begin()
 	_, err := tx.Exec(createTableSql)
 	if err != nil {
 		return false, &err
 	}
+	tx.Commit()
 	return true, nil
 }
