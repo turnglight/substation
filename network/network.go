@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	list2 "container/list"
-	"database/sql"
-	"fmt"
 	"go.uber.org/zap"
 	"log"
 	"net"
@@ -137,7 +135,6 @@ func pushToMysql(list *list2.List) {
 	}
 	db.SetMaxOpenConns(100)
 	defer db.Close()
-	fmt.Println("开启事务")
 
 	i := 0
 	tx, _ := db.Begin()
@@ -155,7 +152,7 @@ func pushToMysql(list *list2.List) {
 		tag := sheath.(*protocol.Sheath).Tag
 		tableName := "monitor_sheath_equipment_" + strconv.Itoa(int(monitorId))
 		if i == 0 {
-			createTable(tableName, db)
+			createTable(tableName)
 			querySql := "select id from monitor_equipment_info where monitor_id =? and code =? and region=?"
 			rows, err := db.Query(querySql, monitorId, Code, Region)
 			if err != nil {
@@ -171,11 +168,10 @@ func pushToMysql(list *list2.List) {
 				if err != nil {
 					logx.Fatal("failed to execute insertSql", zap.String("error", err.Error()))
 				}
-				rowAffected, err := rs.RowsAffected()
+				_, err = rs.RowsAffected()
 				if err != nil {
 					log.Fatalln(err)
 				}
-				logx.Info("successful", zap.Int64("effected rows", rowAffected))
 			}
 		}
 		insertSql := "insert into " + tableName +
@@ -194,7 +190,14 @@ func pushToMysql(list *list2.List) {
 	tx.Commit()
 }
 
-func createTable(tableName string, db *sql.DB) (bool, *error) {
+func createTable(tableName string) (bool, *error) {
+	db, err := database.NewConnection(DbDriver, DataSource)
+	defer db.Close()
+	if err != nil {
+		logx.Error("connect to mysql unsuccessfully", zap.String("remoteAddress", DataSource))
+		return false, &err
+	}
+
 	createTableSql := "create table if not exists " + tableName + "(" +
 		"id int(11) not null auto_increment," +
 		"monitor_id int(6) not null," +
@@ -211,7 +214,7 @@ func createTable(tableName string, db *sql.DB) (bool, *error) {
 		"primary key(id)" +
 		")"
 	tx, _ := db.Begin()
-	_, err := tx.Exec(createTableSql)
+	_, err = tx.Exec(createTableSql)
 	if err != nil {
 		return false, &err
 	}
