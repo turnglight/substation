@@ -48,6 +48,7 @@ type Sheath struct {
 	// 数据接收时间
 	ReceiveTime string
 	State int8
+	Tag string
 }
 
 // WhatError
@@ -112,6 +113,15 @@ func (sheath *Sheath) Handle(buffer []byte, conn net.Conn) (*[]byte, error){
 			// 温度计算公式
 			sheath.Formula = "-15+(100.00/16)*(value-4)"
 		}
+
+		if sheath.DeviceId == 1{
+			sheath.Tag = "A"
+		} else if sheath.DeviceId == 2{
+			sheath.Tag = "B"
+		} else if sheath.DeviceId == 3{
+			sheath.Tag = "C"
+		}
+
 		// 如果buffer的长度与数据解析的长度相等，则代表解析结束，否则返回剩余的字节，循环继续解析
 		if len(buffer) == (int)(34+sheath.DataTotalLength) {
 			return nil, nil

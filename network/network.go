@@ -17,6 +17,7 @@ import (
 
 const (
 	Region     = "tangshan"
+	Short     = "TS"
 	Code       = "SheathCurrent"
 	Productor  = "伏佳安达"
 	DbDriver   = "mysql"
@@ -139,6 +140,7 @@ func pushToMysql(list *list2.List) {
 	fmt.Println("开启事务")
 
 	i := 0
+	tx, _ := db.Begin()
 	for e := list.Front(); e != nil; e = e.Next() {
 		sheath := e.Value
 		cmdType := sheath.(*protocol.Sheath).CmdType
@@ -150,8 +152,11 @@ func pushToMysql(list *list2.List) {
 		formula := sheath.(*protocol.Sheath).Formula
 		finalValue := sheath.(*protocol.Sheath).FinalValue
 		state := sheath.(*protocol.Sheath).State
+		tag := sheath.(*protocol.Sheath).Tag
+		tableName := "monitor_sheath_equipment_" + strconv.Itoa(int(monitorId))
 		if i == 0 {
-			querySql := "select id from equipment_info where monitor_id =? and code =? and region=?"
+			createTable(tableName, db)
+			querySql := "select id from monitor_equipment_info where monitor_id =? and code =? and region=?"
 			rows, err := db.Query(querySql, monitorId, Code, Region)
 			if err != nil {
 				logx.Error("execute query sql failure", zap.String("error", err.Error()))
@@ -159,10 +164,9 @@ func pushToMysql(list *list2.List) {
 			}
 			// 如果还没有初始化此设备，则进行初始化
 			if !rows.Next() {
-				tx, _ := db.Begin()
-				name := "设备" + strconv.Itoa(int(monitorId)) + "(" + Region + "-" + Code + ")"
+				name := "设备" + strconv.Itoa(int(monitorId)) + "(" + Short + "-" + Code + ")"
 				now := time.Now()
-				insertSql := "insert into equipment_info(monitor_id, region, code, name, productor, state, create_time) value(?, ?, ?, ?, ?, ?, ?)"
+				insertSql := "insert into monitor_equipment_info(monitor_id, region, code, name, productor, state, create_time) value(?, ?, ?, ?, ?, ?, ?)"
 				rs, err := tx.Exec(insertSql, monitorId, Region, Code, name, Productor, 1, now.Format("2006-01-02 15:04:05"))
 				if err != nil {
 					logx.Fatal("failed to execute insertSql", zap.String("error", err.Error()))
@@ -171,31 +175,23 @@ func pushToMysql(list *list2.List) {
 				if err != nil {
 					log.Fatalln(err)
 				}
-				tx.Commit()
 				logx.Info("successful", zap.Int64("effected rows", rowAffected))
 			}
 		}
-		tableName := "sheath_equepment_" + strconv.Itoa(int(monitorId))
-		fmt.Printf("%v\n", tableName)
-		b, _ := createTable(tableName, db)
-		if b {
-			tx, _ := db.Begin()
-			insertSql := "insert into " + tableName +
-				"(monitor_id, cmd_type, seq_num, receive_time, device_id, data, formula, final_value, state, create_time) " +
-				"value(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-			rs, err := tx.Exec(insertSql, monitorId, cmdType, seqNumber, receiveTime, deviceId, data, formula, finalValue, state, time.Now().Format("2006-01-02 15:04:05"))
-			if err != nil {
-				logx.Fatal("failed to execute insertSql", zap.String("error", err.Error()))
-			}
-			rowAffected, err := rs.RowsAffected()
-			if err != nil {
-				log.Fatalln(err)
-			}
-			logx.Info("successful", zap.Int64("effected rows", rowAffected))
-			tx.Commit()
+		insertSql := "insert into " + tableName +
+			"(monitor_id, cmd_type, seq_num, receive_time, device_id, tag, data, formula, final_value, state, create_time) " +
+			"value(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+		rs, err := tx.Exec(insertSql, monitorId, cmdType, seqNumber, receiveTime, deviceId, tag, data, formula, finalValue, state, time.Now().Format("2006-01-02 15:04:05"))
+		if err != nil {
+			logx.Fatal("failed to execute insertSql", zap.String("error", err.Error()))
 		}
+		rowAffected, err := rs.RowsAffected()
+		if err != nil {
+			log.Fatalln(err)
+		}
+		logx.Info("successful", zap.Int64("effected rows", rowAffected))
 	}
-	fmt.Println("事务提交")
+	tx.Commit()
 }
 
 func createTable(tableName string, db *sql.DB) (bool, *error) {
@@ -206,6 +202,7 @@ func createTable(tableName string, db *sql.DB) (bool, *error) {
 		"seq_num int(4) not null," +
 		"receive_time datetime not null," +
 		"device_id int(4) not null," +
+		"tag varchar(20) not null," +
 		"formula varchar(40) not null," +
 		"data varchar(10) not null," +
 		"final_value varchar(10)," +
