@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	list2 "container/list"
+	"fmt"
 	"go.uber.org/zap"
 	"log"
 	"net"
@@ -31,7 +32,8 @@ var logf *zap.Logger = logger.NewInstanceForStdout()
 func main() {
 	defer logx.Sync() // flushes buffer, if any
 
-	InitSocket("tcp", "10.190.5.78:7001")
+	//InitSocket("tcp", "10.190.5.78:7001")
+	InitSocket("tcp", "10.190.5.77:7020")
 }
 
 func InitSocket(netType, netAddress string) {
@@ -120,25 +122,25 @@ func process(conn net.Conn) {
 			break
 		}
 	}
-	pushToMysql(list)
+	go pushToMysql(list)
 }
 
 func pushToMysql(list *list2.List) {
 	db, err := database.NewConnection(DbDriver, DataSource)
+	defer db.Close()
 	if err != nil {
 		logx.Error("connect to mysql unsuccessfully", zap.String("remoteAddress", DataSource))
 		return
 	}
+	db.SetMaxOpenConns(50)
+	db.SetConnMaxIdleTime(50)
 	pingErr := db.Ping()
 	if pingErr != nil {
 		logx.Error("sorry, can't connect to mysql", zap.String("remoteAddress", DataSource))
 	}
-	db.SetMaxOpenConns(100)
-	defer db.Close()
 
-	i := 0
 	tx, _ := db.Begin()
-	for e := list.Front(); e != nil; e = e.Next() {
+	for i, e := 0, list.Front(); e != nil; i, e = i + 1, e.Next() {
 		sheath := e.Value
 		cmdType := sheath.(*protocol.Sheath).CmdType
 		monitorId := sheath.(*protocol.Sheath).MonitorId
@@ -152,13 +154,14 @@ func pushToMysql(list *list2.List) {
 		tag := sheath.(*protocol.Sheath).Tag
 		tableName := "monitor_sheath_equipment_" + strconv.Itoa(int(monitorId))
 		if i == 0 {
-			createTable(tableName)
+			go createTable(tableName)
 			querySql := "select id from monitor_equipment_info where monitor_id =? and code =? and region=?"
 			rows, err := db.Query(querySql, monitorId, Code, Region)
 			if err != nil {
 				logx.Error("execute query sql failure", zap.String("error", err.Error()))
 				panic(err.Error())
 			}
+			defer rows.Close()
 			// 如果还没有初始化此设备，则进行初始化
 			if !rows.Next() {
 				name := "设备" + strconv.Itoa(int(monitorId)) + "(" + Short + "-" + Code + ")"
@@ -197,7 +200,6 @@ func createTable(tableName string) (bool, *error) {
 		logx.Error("connect to mysql unsuccessfully", zap.String("remoteAddress", DataSource))
 		return false, &err
 	}
-
 	createTableSql := "create table if not exists " + tableName + "(" +
 		"id int(11) not null auto_increment," +
 		"monitor_id int(6) not null," +
@@ -213,7 +215,12 @@ func createTable(tableName string) (bool, *error) {
 		"create_time datetime," +
 		"primary key(id)" +
 		")"
-	tx, _ := db.Begin()
+	tx, err := db.Begin()
+	if err != nil {
+		fmt.Println("%T\n", tx)
+		logx.Error("failed to get tx", zap.String("error", err.Error()))
+		return false, nil
+	}
 	_, err = tx.Exec(createTableSql)
 	if err != nil {
 		return false, &err

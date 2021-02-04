@@ -12,6 +12,7 @@ type Equipment struct{
 	Name string
 	MonitorId int32
 	Productor string
+	LineName string
 	State int8
 	CreateTime string
 	UpdateTime string
@@ -66,7 +67,7 @@ func GetDeviceList() *[]Equipment{
 func GetDataForLine(monitorId, cmdType int32) *[]Sheath{
 	var list []Sheath
 	tableName := "monitor_sheath_equipment_" + strconv.Itoa(int(monitorId))
-	result := db.Table(tableName).Where("monitor_id = ? and cmd_type = ? and device_id!=4",  monitorId, cmdType).Limit(1024).Find(&list)
+	result := db.Table(tableName).Where("monitor_id = ? and cmd_type = ?",  monitorId, cmdType).Limit(1024).Find(&list)
 	fmt.Println(monitorId, cmdType)
 	fmt.Println(result.RowsAffected)
 	rowsAffected := result.RowsAffected
