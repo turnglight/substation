@@ -3,6 +3,7 @@ package models
 import (
 	"fmt"
 	"strconv"
+	"time"
 )
 
 type Equipment struct{
@@ -65,9 +66,13 @@ func GetDeviceList() *[]Equipment{
 }
 
 func GetDataForLine(monitorId, cmdType int32) *[]Sheath{
+	now := time.Now()
+	duration, _ := time.ParseDuration("-24h")
+	lastTime := now.Add(duration)
+	stime := lastTime.Format("2006-01-02 15:04:05")
 	var list []Sheath
 	tableName := "monitor_sheath_equipment_" + strconv.Itoa(int(monitorId))
-	result := db.Table(tableName).Where("monitor_id = ? and cmd_type = ?",  monitorId, cmdType).Limit(1024).Find(&list)
+	result := db.Table(tableName).Where(" monitor_id = ? and cmd_type = ? and create_time > ?",  monitorId, cmdType, stime).Limit(1024).Find(&list)
 	fmt.Println(monitorId, cmdType)
 	fmt.Println(result.RowsAffected)
 	rowsAffected := result.RowsAffected
