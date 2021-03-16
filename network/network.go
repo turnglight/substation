@@ -20,7 +20,7 @@ const (
 	Code       = "SheathCurrent"
 	Productor  = "伏佳安达"
 	DbDriver   = "mysql"
-	DataSource = "root:admin@tcp(localhost:3306)/monitor_tangshan"
+	DataSource = "root:whfjad888@tcp(localhost:3306)/monitor_tangshan"
 )
 
 // 文件日志处理器
@@ -33,7 +33,7 @@ func main() {
 	defer logx.Sync() // flushes buffer, if any
 
 	//InitSocket("tcp", "10.190.5.78:7001")
-	InitSocket("tcp", "10.190.5.77:7020")
+	InitSocket("tcp", "10.190.21.34:7020")
 }
 
 func InitSocket(netType, netAddress string) {
@@ -154,7 +154,7 @@ func pushToMysql(list *list2.List) {
 		tag := sheath.(*protocol.Sheath).Tag
 		tableName := "monitor_sheath_equipment_" + strconv.Itoa(int(monitorId))
 		if i == 0 {
-			go createTable(tableName)
+			createTable(tableName)
 			querySql := "select id from monitor_equipment_info where monitor_id =? and code =? and region=?"
 			rows, err := db.Query(querySql, monitorId, Code, Region)
 			if err != nil {
